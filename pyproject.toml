@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pytest-deprecation-radar"
+version = "0.1.0"
+description = "See every deprecation your code depends on, grouped by library, before the upgrade breaks it."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Shalom Hunukumbura" }]
+keywords = ["pytest", "deprecation", "warnings", "upgrade", "dependencies"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/ShalomHunukumbura/deprecation-radar"
+Issues = "https://github.com/ShalomHunukumbura/deprecation-radar/issues"
+
+[project.entry-points.pytest11]
+deprecation_radar = "deprecation_radar.plugin"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deprecation_radar"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The plugin's own tests trigger deprecations on purpose inside pytester runs, so it
+# stays off for the outer run. Each pytester run loads it fresh.
+addopts = "-p no:deprecation_radar -p pytester"
