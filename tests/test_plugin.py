@@ -242,3 +242,166 @@ def test_can_be_disabled(pytester: pytest.Pytester, fakelib: Path) -> None:
     )
     result = pytester.runpytest("-p", "no:deprecation_radar")
     assert "deprecation-radar" not in result.stdout.str()
+
+
+# --- milestone 4: baseline, fail modes, ignoring, annotations ------------------------
+
+APP = """
+import fakelib
+
+def use_it():
+    fakelib.old()
+"""
+
+TEST_APP = """
+import app
+
+def test_app():
+    app.use_it()
+"""
+
+
+def test_without_a_baseline_nothing_fails(pytester: pytest.Pytester, fakelib: Path) -> None:
+    pytester.makepyfile(app=APP, test_app=TEST_APP)
+    assert pytester.runpytest().ret == pytest.ExitCode.OK
+
+
+def test_baseline_lets_known_uses_pass_and_new_ones_fail(pytester: pytest.Pytester, fakelib: Path) -> None:
+    pytester.makepyfile(app=APP, test_app=TEST_APP)
+    result = pytester.runpytest("--deprecation-radar-update-baseline")
+    assert result.ret == pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["deprecation-radar: wrote 1 known use to .deprecation-radar-baseline.json."])
+    saved = json.loads((pytester.path / ".deprecation-radar-baseline.json").read_text())
+    assert saved == {
+        "version": 1,
+        "deprecations": [
+            {
+                "path": "app.py",
+                "function": "use_it",
+                "category": "FakelibDeprecationWarning",
+                "message": "old() is deprecated and will be removed in fakelib 2.0, use new()",
+            }
+        ],
+    }
+
+    # Lines added above the call don't make it new.
+    pytester.makepyfile(app="\n\n" + APP)
+    result = pytester.runpytest()
+    assert result.ret == pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["*used at 1 place in your code, all in the baseline."])
+
+    pytester.makepyfile(app=APP + "\ndef also():\n    fakelib.old()\n")
+    pytester.makepyfile(test_app=TEST_APP + "    app.also()\n")
+    result = pytester.runpytest()
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    result.stdout.fnmatch_lines(
+        [
+            "    NEW app.py:7 in also",
+            "    app.py:4 in use_it",
+            "*used at 2 places in your code; 1 new use fails the run.",
+        ]
+    )
+
+
+def test_baseline_survives_a_version_in_a_message_url(pytester: pytest.Pytester) -> None:
+    # Pydantic's messages link to errors.pydantic.dev/<installed version>/..., which
+    # changes with every minor upgrade.
+    lib = pytester.path.parent / f"{pytester.path.name}-site"
+    (lib / "urllib_lib").mkdir(parents=True)
+    pytester.syspathinsert(lib)
+
+    def install(version: str) -> None:
+        (lib / "urllib_lib" / "__init__.py").write_text(
+            "import warnings\n"
+            "def old():\n"
+            f"    warnings.warn('old() is deprecated. See https://errors.example.dev/{version}/old', "
+            "DeprecationWarning, stacklevel=2)\n"
+        )
+
+    pytester.makepyfile("import urllib_lib\n\ndef test_it():\n    urllib_lib.old()\n")
+    install("2.14")
+    pytester.runpytest("--deprecation-radar-update-baseline")
+    install("2.15")
+    result = pytester.runpytest()
+    assert result.ret == pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["*all in the baseline."])
+
+
+def test_fail_on_any(pytester: pytest.Pytester, fakelib: Path) -> None:
+    pytester.makepyfile(app=APP, test_app=TEST_APP)
+    pytester.makeini("[pytest]\ndeprecation_radar_fail = any\n")
+    result = pytester.runpytest()
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    result.stdout.fnmatch_lines(["*; 1 use fails the run."])
+
+
+def test_fail_never_with_a_baseline(pytester: pytest.Pytester, fakelib: Path) -> None:
+    pytester.makepyfile(app=APP, test_app=TEST_APP)
+    (pytester.path / ".deprecation-radar-baseline.json").write_text('{"version": 1, "deprecations": []}')
+    pytester.makeini("[pytest]\ndeprecation_radar_fail = never\n")
+    assert pytester.runpytest().ret == pytest.ExitCode.OK
+
+
+def test_uses_inside_packages_never_fail(pytester: pytest.Pytester, fakelib: Path) -> None:
+    pytester.makepyfile("import fakelib\n\ndef test_it():\n    fakelib.internal()\n")
+    pytester.makeini("[pytest]\ndeprecation_radar_fail = any\n")
+    assert pytester.runpytest().ret == pytest.ExitCode.OK
+
+
+def test_ignore_a_source(pytester: pytest.Pytester, fakelib: Path) -> None:
+    pytester.makepyfile(app=APP, test_app=TEST_APP)
+    pytester.makeini("[pytest]\ndeprecation_radar_fail = any\ndeprecation_radar_ignore = FakeLib\n")
+    result = pytester.runpytest()
+    assert result.ret == pytest.ExitCode.OK
+    result.stdout.fnmatch_lines(["deprecation-radar: no deprecation warnings in this run."])
+
+
+def test_bad_fail_mode_is_a_usage_error(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile("def test_ok():\n    pass\n")
+    pytester.makeini("[pytest]\ndeprecation_radar_fail = sometimes\n")
+    result = pytester.runpytest()
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*'sometimes' is not one of new, any, never*"])
+
+
+def test_broken_baseline_is_a_usage_error(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile("def test_ok():\n    pass\n")
+    (pytester.path / ".deprecation-radar-baseline.json").write_text("[1, 2]")
+    result = pytester.runpytest()
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*not a deprecation-radar baseline*"])
+
+
+def test_baseline_reports_entries_no_longer_seen(pytester: pytest.Pytester, fakelib: Path) -> None:
+    pytester.makepyfile(app=APP, test_app=TEST_APP)
+    pytester.runpytest("--deprecation-radar-update-baseline")
+    pytester.makepyfile(app="def use_it():\n    pass\n")
+    result = pytester.runpytest()
+    result.stdout.fnmatch_lines(["deprecation-radar: 1 baseline entry was not seen in this run*"])
+
+
+def test_github_annotations_without_a_baseline(
+    pytester: pytest.Pytester, fakelib: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    pytester.makepyfile(app=APP, test_app=TEST_APP)
+    result = pytester.runpytest()
+    result.stdout.fnmatch_lines(
+        [
+            "::warning file=app.py,line=4,title=deprecation-radar%3A FakelibDeprecationWarning::"
+            "old() is deprecated and will be removed in fakelib 2.0, use new() (from fakelib)"
+        ]
+    )
+
+
+def test_github_annotations_mark_only_new_uses(
+    pytester: pytest.Pytester, fakelib: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    pytester.makepyfile(app=APP, test_app=TEST_APP)
+    pytester.runpytest("--deprecation-radar-update-baseline")
+    pytester.makepyfile(app=APP + "\ndef also():\n    fakelib.old()\n")
+    pytester.makepyfile(test_app=TEST_APP + "    app.also()\n")
+    output = pytester.runpytest().stdout.str()
+    assert "::error file=app.py,line=7," in output
+    assert "line=4" not in output
