@@ -8,3 +8,6 @@ dist/
 # The explainer stays local.
 explain.md
 explain.pdf
+
+# Written by the demo run.
+demo.json

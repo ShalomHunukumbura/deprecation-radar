@@ -1,0 +1,7 @@
+# The versions the README's report was made with. Pinned so the demo's deprecations,
+# and the CI check on them, don't change when a library releases.
+fastapi==0.162.0
+pydantic==2.14.1
+sqlalchemy==2.1.6
+starlette==1.10.0
+httpx==0.28.1
