@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from deprecation_radar.collect import is_deprecation, normalise
-from deprecation_radar.origin import PYTHON, UNKNOWN, Origins, _top_module, function_at, removal_version
+from deprecation_radar.origin import PYTHON, UNKNOWN, Origins, _top_module, removal_version
 
 
 @pytest.mark.parametrize(
@@ -66,6 +66,7 @@ def test_function_at(tmp_path: Path) -> None:
         "async def fetch():\n"
         "    pass\n"
     )
+    function_at = Origins(tmp_path).function_at
     assert function_at(str(src), 1) == "<module>"
     assert function_at(str(src), 3) == "Order.total"
     assert function_at(str(src), 5) == "Order.total.inner"
@@ -123,3 +124,4 @@ def test_your_code_vs_installed_code(tmp_path: Path) -> None:
     assert not origins.is_yours(str(tmp_path / ".venv" / "lib" / "x.py"))
     assert not origins.is_yours(pytest.__file__)
     assert PYTHON.label() == "Python {}.{} standard library".format(*sys.version_info[:2])
+

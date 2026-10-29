@@ -11,7 +11,7 @@ import re
 import warnings
 from dataclasses import dataclass, field
 
-from .origin import Origins, Source, function_at, removal_version
+from .origin import Origins, Source, removal_version
 
 CATEGORIES = (DeprecationWarning, PendingDeprecationWarning, FutureWarning)
 # Some libraries subclass UserWarning on purpose, because Python hides DeprecationWarning
@@ -85,7 +85,7 @@ class Collector:
             site = deprecation.sites[where] = Site(
                 path=self.origins.relative(warning.filename) if yours else warning.filename,
                 lineno=warning.lineno,
-                function=function_at(warning.filename, warning.lineno),
+                function=self.origins.function_at(warning.filename, warning.lineno),
                 yours=yours,
                 package=None if yours else self._package_of(warning.filename),
             )

@@ -43,6 +43,7 @@ UNKNOWN = Source("unknown", kind="unknown")
 class Origins:
     def __init__(self, rootpath: Path) -> None:
         self.root = rootpath.resolve()
+        self._scopes: dict[str, dict[int, str]] = {}
 
     @cache  # one Origins per run, so caching on self is fine
     def is_yours(self, filename: str) -> bool:
@@ -51,6 +52,14 @@ class Origins:
         except (ValueError, OSError):
             return False
         return not _NOT_YOURS.intersection(relative.parts)
+
+    def function_at(self, filename: str, lineno: int) -> str:
+        """The function or method around a line, or `<module>`. Each file is parsed once
+        per run. Cached here, not for the whole process, so a file that changes between
+        two runs in one process (as in this plugin's own tests) is read again."""
+        if filename not in self._scopes:
+            self._scopes[filename] = scopes(filename)
+        return self._scopes[filename].get(lineno, "<module>")
 
     def relative(self, filename: str) -> str:
         try:
@@ -183,14 +192,8 @@ def removal_version(message: str) -> str | None:
     return f"{name} {m.group('version')}".strip()
 
 
-@cache
-def function_at(filename: str, lineno: int) -> str:
-    """The function or method around a line, like `Order.total`, or `<module>`."""
-    return _scopes(filename).get(lineno, "<module>")
-
-
-@cache
-def _scopes(filename: str) -> dict[int, str]:
+def scopes(filename: str) -> dict[int, str]:
+    """Line number -> the function or method around it, like `Order.total`."""
     try:
         tree = ast.parse(Path(filename).read_text(encoding="utf-8"))
     except (OSError, SyntaxError, ValueError):
